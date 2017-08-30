@@ -2,6 +2,7 @@
 
 namespace Lexik\Bundle\TranslationBundle\DependencyInjection;
 
+use Doctrine\ORM\Events;
 use Lexik\Bundle\TranslationBundle\Storage\StorageInterface;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\Config\Definition\Processor;
@@ -13,6 +14,7 @@ use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Loader;
 use Symfony\Component\Finder\Finder;
+use Symfony\Component\HttpKernel\Kernel;
 
 /**
  * This is the class that loads and manages your bundle configuration
@@ -43,13 +45,16 @@ class LexikTranslationExtension extends Extension
         $container->setParameter('lexik_translation.base_layout', $config['base_layout']);
         $container->setParameter('lexik_translation.grid_input_type', $config['grid_input_type']);
         $container->setParameter('lexik_translation.grid_toggle_similar', $config['grid_toggle_similar']);
-        $container->setParameter('lexik_translation.use_yml_tree', $config['use_yml_tree']);
         $container->setParameter('lexik_translation.auto_cache_clean', $config['auto_cache_clean']);
         $container->setParameter('lexik_translation.dev_tools.enable', $config['dev_tools']['enable']);
         $container->setParameter('lexik_translation.dev_tools.create_missing', $config['dev_tools']['create_missing']);
+        $container->setParameter('lexik_translation.dev_tools.file_format', $config['dev_tools']['file_format']);
+        $container->setParameter('lexik_translation.exporter.json.hierarchical_format', $config['exporter']['json_hierarchical_format']);
+        $container->setParameter('lexik_translation.exporter.yml.use_tree', $config['exporter']['use_yml_tree']);
 
         $objectManager = isset($config['storage']['object_manager']) ? $config['storage']['object_manager'] : null;
 
+        $this->buildTranslatorDefinition($container);
         $this->buildTranslationStorageDefinition($container, $config['storage']['type'], $objectManager);
 
         if (true === $config['auto_cache_clean']) {
@@ -61,6 +66,37 @@ class LexikTranslationExtension extends Extension
         }
 
         $this->registerTranslatorConfiguration($config, $container);
+    }
+
+    /**
+     * @param ContainerBuilder $container
+     */
+    public function buildTranslatorDefinition(ContainerBuilder $container)
+    {
+        $translator = new Definition();
+        $translator->setClass('%lexik_translation.translator.class%');
+
+        if (Kernel::VERSION_ID >= 30300) {
+            $arguments = [
+                new Reference('service_container'), // Will be replaced by service locator
+                new Reference('translator.selector'),
+                new Parameter('kernel.default_locale'),
+                [], // translation loaders
+                new Parameter('lexik_translation.translator.options')
+            ];
+        } else {
+            $arguments = [
+                new Reference('service_container'),
+                new Reference('translator.selector'),
+                [], // translation loaders
+                new Parameter('lexik_translation.translator.options')
+            ];
+        }
+
+        $translator->setArguments($arguments);
+        $translator->addMethodCall('setConfigCacheFactory', [new Reference('config_cache_factory')]);
+
+        $container->setDefinition('lexik_translation.translator', $translator);
     }
 
     /**
@@ -105,6 +141,15 @@ class LexikTranslationExtension extends Extension
             );
 
             $this->createDoctrineMappingDriver($container, 'lexik_translation.orm.metadata.xml', '%doctrine.orm.metadata.xml.class%');
+
+            $metadataListener = new Definition();
+            $metadataListener->setClass('%lexik_translation.orm.listener.class%');
+            $metadataListener->addTag('doctrine.event_listener', array(
+                'event' => Events::loadClassMetadata,
+            ));
+
+            $container->setDefinition('lexik_translation.orm.listener', $metadataListener);
+
         } elseif (StorageInterface::STORAGE_MONGODB == $storage) {
             $args = array(
                 new Reference('doctrine_mongodb'),
@@ -239,7 +284,7 @@ class LexikTranslationExtension extends Extension
 
                 if (true === $registration['managed_locales_only']) {
                     // only look for managed locales
-                    $finder->name(sprintf('/(.*\.(%s)\..*)/', implode('|', $config['managed_locales'])));
+                    $finder->name(sprintf('/(.*\.(%s)\.\w+$)/', implode('|', $config['managed_locales'])));
                 } else {
                     $finder->filter(function (\SplFileInfo $file) {
                         return 2 === substr_count($file->getBasename(), '.') && preg_match('/\.\w+$/', $file->getBasename());
