@@ -56,6 +56,16 @@ abstract class File
      * @var Doctrine\Common\Collections\Collection
      */
     protected $translations;
+	
+	/**
+	* @var \DateTime
+	*/
+	protected $createdAt;
+	
+	/**
+	* @var \DateTime
+	*/
+	protected $updatedAt;
 
     /**
      * Construct.
@@ -220,4 +230,22 @@ abstract class File
     {
         return $this->translations;
     }
+	
+	public function getCreatedAt() {
+		return $this->createdAt;
+	}
+	
+	public function setCreatedAt($createdAt) {
+		$this->createdAt = $createdAt;
+		return $this;
+	}
+	
+	public function getUpdatedAt() {
+		return $this->updatedAt;
+	}
+	
+	public function setUpdatedAt($updatedAt) {
+		$this->updatedAt = $updatedAt;
+		return $this;
+	}
 }
