@@ -2,7 +2,9 @@
 
 namespace Lexik\Bundle\TranslationBundle\Controller;
 
+use Lexik\Bundle\TranslationBundle\Form\Type\TransUnitType;
 use Lexik\Bundle\TranslationBundle\Storage\StorageInterface;
+use Lexik\Bundle\TranslationBundle\Util\Csrf\CsrfCheckerTrait;
 use Symfony\Bundle\FrameworkBundle\Controller\Controller;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -12,6 +14,8 @@ use Symfony\Component\HttpFoundation\Request;
  */
 class TranslationController extends Controller
 {
+    use CsrfCheckerTrait;
+
     /**
      * Display an overview of the translation status per domain.
      *
@@ -67,6 +71,8 @@ class TranslationController extends Controller
         $message = $this->get('translator')->trans('translations.cache_removed', array(), 'LexikTranslationBundle');
 
         if ($request->isXmlHttpRequest()) {
+            $this->checkCsrf();
+
             return new JsonResponse(array('message' => $message));
         }
 
@@ -84,7 +90,7 @@ class TranslationController extends Controller
     {
         $handler = $this->get('lexik_translation.form.handler.trans_unit');
 
-        $form = $this->createForm('Lexik\Bundle\TranslationBundle\Form\Type\TransUnitType', $handler->createFormData(), $handler->getFormOptions());
+        $form = $this->createForm(TransUnitType::class, $handler->createFormData(), $handler->getFormOptions());
 
         if ($handler->process($form, $request)) {
             $message = $this->get('translator')->trans('translations.successfully_added', array(), 'LexikTranslationBundle');

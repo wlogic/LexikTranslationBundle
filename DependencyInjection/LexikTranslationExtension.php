@@ -171,7 +171,7 @@ class LexikTranslationExtension extends Extension
         );
 
         $storageDefinition = new Definition();
-        $storageDefinition->setClass(new Parameter(sprintf('lexik_translation.%s.translation_storage.class', $storage)));
+        $storageDefinition->setClass($container->getParameter(sprintf('lexik_translation.%s.translation_storage.class', $storage)));
         $storageDefinition->setArguments($args);
 
         $container->setDefinition('lexik_translation.translation_storage', $storageDefinition);
@@ -206,7 +206,7 @@ class LexikTranslationExtension extends Extension
             ->addMethodCall('setProfiler', array(new Reference('profiler')));
 
         $tokenFinderDefinition = new Definition();
-        $tokenFinderDefinition->setClass(new Parameter('lexik_translation.token_finder.class'));
+        $tokenFinderDefinition->setClass($container->getParameter('lexik_translation.token_finder.class'));
         $tokenFinderDefinition->setArguments(array(
             new Reference('profiler'),
             new Parameter('lexik_translation.token_finder.limit'),
