@@ -2,13 +2,17 @@
 
 namespace Lexik\Bundle\TranslationBundle\Command;
 
-use Symfony\Bundle\FrameworkBundle\Command\ContainerAwareCommand;
+use Lexik\Bundle\TranslationBundle\Manager\LocaleManager;
+use Lexik\Bundle\TranslationBundle\Translation\Importer\FileImporter;
+use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\HttpKernel\Bundle\BundleInterface;
+use Symfony\Component\HttpKernel\Kernel;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * Imports translation files content in the database.
@@ -17,8 +21,29 @@ use Symfony\Component\HttpKernel\Bundle\BundleInterface;
  * @author Cédric Girard <c.girard@lexik.fr>
  * @author Nikola Petkanski <nikola@petkanski.com>
  */
-class ImportTranslationsCommand extends ContainerAwareCommand
+class ImportTranslationsCommand extends Command
 {
+    private TranslatorInterface $translator;
+
+    private LocaleManager $localeManager;
+    private FileImporter $fileImporter;
+
+    /**
+     * @param TranslatorInterface $translator
+     */
+    public function __construct(
+        TranslatorInterface $translator,
+        LocaleManager $localeManager,
+        FileImporter $fileImporter
+    )
+    {
+        parent::__construct();
+
+        $this->translator = $translator;
+        $this->localeManager = $localeManager;
+        $this->fileImporter = $fileImporter;
+    }
+
     /**
      * @var \Symfony\Component\Console\Input\InputInterface
      */
@@ -53,7 +78,7 @@ class ImportTranslationsCommand extends ContainerAwareCommand
     /**
      * {@inheritdoc}
      */
-    protected function execute(InputInterface $input, OutputInterface $output)
+    protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $this->input = $input;
         $this->output = $output;
@@ -62,7 +87,7 @@ class ImportTranslationsCommand extends ContainerAwareCommand
 
         $locales = $this->input->getOption('locales');
         if (empty($locales)) {
-            $locales = $this->getContainer()->get('lexik_translation.locale.manager')->getLocales();
+            $locales = $this->localeManager->getLocales();
         }
 
         $domains = $input->getOption('domains') ? explode(',', $input->getOption('domains')) : array();
@@ -71,7 +96,7 @@ class ImportTranslationsCommand extends ContainerAwareCommand
         if ($bundleName) {
             $bundle = $this->getApplication()->getKernel()->getBundle($bundleName);
 
-            if (null !== $bundle->getParent()) {
+            if (Kernel::VERSION_ID < 40000 && null !== $bundle->getParent()) {
                 // due to symfony's bundle inheritance if a bundle has a parent it is fetched first.
                 // so we tell getBundle to NOT fetch the first if a parent is present
                 $bundles = $this->getApplication()->getKernel()->getBundle($bundle->getParent(), false);
@@ -114,8 +139,10 @@ class ImportTranslationsCommand extends ContainerAwareCommand
 
         if ($this->input->getOption('cache-clear')) {
             $this->output->writeln('<info>Removing translations cache files ...</info>');
-            $this->getContainer()->get('translator')->removeLocalesCacheFiles($locales);
+            $this->translator->removeLocalesCacheFiles($locales);
         }
+
+        return 0;
     }
 
     /**
@@ -182,7 +209,12 @@ class ImportTranslationsCommand extends ContainerAwareCommand
      */
     protected function importAppTranslationFiles(array $locales, array $domains)
     {
-        $finder = $this->findTranslationsFiles($this->getApplication()->getKernel()->getRootDir(), $locales, $domains);
+        if (Kernel::MAJOR_VERSION >= 4) {
+            $translationPath = $this->getApplication()->getKernel()->getProjectDir().'/translations';
+            $finder = $this->findTranslationsFiles($translationPath, $locales, $domains, false);
+        } else {
+            $finder = $this->findTranslationsFiles($this->getApplication()->getKernel()->getRootDir(), $locales, $domains);
+        }
         $this->importTranslationFiles($finder);
     }
 
@@ -236,15 +268,14 @@ class ImportTranslationsCommand extends ContainerAwareCommand
             return;
         }
 
-        $importer = $this->getContainer()->get('lexik_translation.importer.file');
-        $importer->setCaseInsensitiveInsert($this->input->getOption('case-insensitive'));
+        $this->fileImporter->setCaseInsensitiveInsert($this->input->getOption('case-insensitive'));
 
         foreach ($finder as $file) {
             $this->output->write(sprintf('Importing <comment>"%s"</comment> ... ', $file->getPathname()));
-            $number = $importer->import($file, $this->input->getOption('force'), $this->input->getOption('merge'));
+            $number = $this->fileImporter->import($file, $this->input->getOption('force'), $this->input->getOption('merge'));
             $this->output->writeln(sprintf('%d translations', $number));
 
-            $skipped = $importer->getSkippedKeys();
+            $skipped = $this->fileImporter->getSkippedKeys();
             if (count($skipped) > 0) {
                 $this->output->writeln(sprintf('    <error>[!]</error> The following keys has been skipped: "%s".', implode('", "', $skipped)));
             }
@@ -268,7 +299,7 @@ class ImportTranslationsCommand extends ContainerAwareCommand
         }
 
         if (true === $autocompletePath) {
-            $dir = (0 === strpos($path, $this->getApplication()->getKernel()->getRootDir() . '/Resources')) ? $path : $path . '/Resources/translations';
+            $dir = (0 === strpos($path, $this->getApplication()->getKernel()->getProjectDir() . '/Resources')) ? $path : $path . '/Resources/translations';
         } else {
             $dir = $path;
         }
@@ -292,7 +323,7 @@ class ImportTranslationsCommand extends ContainerAwareCommand
      */
     protected function getFileNamePattern(array $locales, array $domains)
     {
-        $formats = $this->getContainer()->get('lexik_translation.translator')->getFormats();
+        $formats = $this->translator->getFormats();
 
         if (count($domains)) {
             $regex = sprintf('/((%s)\.(%s)\.(%s))/', implode('|', $domains), implode('|', $locales), implode('|', $formats));

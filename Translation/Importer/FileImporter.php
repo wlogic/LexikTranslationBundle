@@ -2,6 +2,7 @@
 
 namespace Lexik\Bundle\TranslationBundle\Translation\Importer;
 
+use Lexik\Bundle\TranslationBundle\Entity\Translation;
 use Lexik\Bundle\TranslationBundle\Storage\StorageInterface;
 use Lexik\Bundle\TranslationBundle\Document\TransUnit as TransUnitDocument;
 use Lexik\Bundle\TranslationBundle\Manager\FileManagerInterface;
@@ -92,13 +93,13 @@ class FileImporter
     {
         $this->skippedKeys = array();
         $imported = 0;
-        list($domain, $locale, $extention) = explode('.', $file->getFilename());
+        list($domain, $locale, $extension) = explode('.', $file->getFilename());
 
-        if (!isset($this->loaders[$extention])) {
-            throw new \RuntimeException(sprintf('No load found for "%s" format.', $extention));
+        if (!isset($this->loaders[$extension])) {
+            throw new \RuntimeException(sprintf('No loader found for "%s" format.', $extension));
         }
 
-        $messageCatalogue = $this->loaders[$extention]->load($file->getPathname(), $locale, $domain);
+        $messageCatalogue = $this->loaders[$extension]->load($file->getPathname(), $locale, $domain);
 
         $translationFile = $this->fileManager->getFor($file->getFilename(), $file->getPath());
 
@@ -122,18 +123,21 @@ class FileImporter
                 $transUnit = $this->transUnitManager->create($key, $domain);
             }
 
-            $translation = $this->transUnitManager->addTranslation($transUnit, $locale, $content, $translationFile);
-            if ($translation instanceof TranslationInterface) {
-                $imported++;
-            } elseif ($forceUpdate) {
-                $translation = $this->transUnitManager->updateTranslation($transUnit, $locale, $content);
-                $imported++;
-            } elseif ($merge) {
-                $translation = $this->transUnitManager->updateTranslation($transUnit, $locale, $content, false, true);
+                $translation = $this->transUnitManager->addTranslation($transUnit, $locale, $content, $translationFile);
                 if ($translation instanceof TranslationInterface) {
                     $imported++;
+                } else if($forceUpdate) {
+                    $translation = $this->transUnitManager->updateTranslation($transUnit, $locale, $content);
+                    if ($translation instanceof Translation) {
+                        $translation->setModifiedManually(false);
+                    }
+                    $imported++;
+                } else if($merge) {
+                    $translation = $this->transUnitManager->updateTranslation($transUnit, $locale, $content, false, true);
+                    if ($translation instanceof TranslationInterface) {
+                        $imported++;
+                    }
                 }
-            }
 
             $keys[] = $normalizedKey;
 

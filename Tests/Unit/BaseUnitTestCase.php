@@ -2,26 +2,39 @@
 
 namespace Lexik\Bundle\TranslationBundle\Tests\Unit;
 
+use Doctrine\Bundle\MongoDBBundle\Mapping\Driver\XmlDriver;
 use Doctrine\Common\Cache\ArrayCache;
-use Doctrine\Common\Persistence\ObjectManager;
-use Doctrine\Common\DataFixtures\Executor\ORMExecutor;
 use Doctrine\Common\DataFixtures\Executor\MongoDBExecutor;
-use Doctrine\Common\DataFixtures\Purger\ORMPurger;
+use Doctrine\Common\DataFixtures\Executor\ORMExecutor;
 use Doctrine\Common\DataFixtures\Purger\MongoDBPurger;
-use Doctrine\Common\Annotations\AnnotationReader;
+use Doctrine\Common\DataFixtures\Purger\ORMPurger;
+use Doctrine\ODM\MongoDB\Configuration;
+use Doctrine\ODM\MongoDB\DocumentManager;
+use Doctrine\ODM\MongoDB\Mapping\ClassMetadataFactory;
+use Doctrine\ODM\MongoDB\SchemaManager;
+use Doctrine\ORM\EntityManager;
+use Doctrine\ORM\Tools\SchemaTool;
 use Doctrine\ORM\Tools\Setup;
+use Doctrine\Persistence\ObjectManager;
 use Lexik\Bundle\TranslationBundle\Storage\DoctrineMongoDBStorage;
 use Lexik\Bundle\TranslationBundle\Storage\DoctrineORMStorage;
+use Lexik\Bundle\TranslationBundle\Storage\PropelStorage;
 use Lexik\Bundle\TranslationBundle\Tests\Fixtures\TransUnitData;
 use Lexik\Bundle\TranslationBundle\Tests\Fixtures\TransUnitDataPropel;
-use Lexik\Bundle\TranslationBundle\Storage\PropelStorage;
+use MongoDB\Client;
+use PHPUnit\Framework\MockObject\MockObject;
+use PHPUnit\Framework\TestCase;
+use Propel\Generator\Util\QuickBuilder;
+use Propel\Runtime\Connection\ConnectionWrapper;
+use Propel\Runtime\Connection\PdoConnection;
+use Propel\Runtime\Propel;
 
 /**
  * Base unit test class providing functions to create a mock entity manger, load schema and fixtures.
  *
  * @author Cédric Girard <c.girard@lexik.fr>
  */
-abstract class BaseUnitTestCase extends \PHPUnit_Framework_TestCase
+abstract class BaseUnitTestCase extends TestCase
 {
     const ENTITY_TRANS_UNIT_CLASS  = 'Lexik\Bundle\TranslationBundle\Entity\TransUnit';
     const ENTITY_TRANSLATION_CLASS = 'Lexik\Bundle\TranslationBundle\Entity\Translation';
@@ -38,37 +51,34 @@ abstract class BaseUnitTestCase extends \PHPUnit_Framework_TestCase
     /**
      * Create a storage class form doctrine ORM.
      *
-     * @param \Doctrine\ORM\EntityManager $em
-     * @return \Lexik\Bundle\TranslationBundle\Storage\DoctrineORMStorage
+     * @param EntityManager $em
+     * @return DoctrineORMStorage
      */
-    protected function getORMStorage(\Doctrine\ORM\EntityManager $em)
+    protected function getORMStorage(EntityManager $em)
     {
         $registryMock = $this->getDoctrineRegistryMock($em);
 
-        $storage = new DoctrineORMStorage($registryMock, 'default', array(
-            'trans_unit'  => self::ENTITY_TRANS_UNIT_CLASS,
+        $storage = new DoctrineORMStorage($registryMock, 'default', [
+            'trans_unit' => self::ENTITY_TRANS_UNIT_CLASS,
             'translation' => self::ENTITY_TRANSLATION_CLASS,
-            'file'        => self::ENTITY_FILE_CLASS,
-        ));
+            'file' => self::ENTITY_FILE_CLASS,
+        ]);
 
         return $storage;
     }
 
     /**
      * Create a storage class form doctrine Mongo DB.
-     *
-     * @param \Doctrine\ODM\MongoDB\DocumentManager $dm
-     * @return \Lexik\Bundle\TranslationBundle\Storage\DoctrineORMStorage
      */
-    protected function getMongoDBStorage(\Doctrine\ODM\MongoDB\DocumentManager $dm)
+    protected function getMongoDBStorage(DocumentManager $dm): DoctrineMongoDBStorage
     {
         $registryMock = $this->getDoctrineRegistryMock($dm);
 
-        $storage = new DoctrineMongoDBStorage($registryMock, 'default', array(
-            'trans_unit'  => self::DOCUMENT_TRANS_UNIT_CLASS,
+        $storage = new DoctrineMongoDBStorage($registryMock, 'default', [
+            'trans_unit' => self::DOCUMENT_TRANS_UNIT_CLASS,
             'translation' => self::DOCUMENT_TRANSLATION_CLASS,
-            'file'        => self::DOCUMENT_FILE_CLASS,
-        ));
+            'file' => self::DOCUMENT_FILE_CLASS,
+        ]);
 
         return $storage;
     }
@@ -76,15 +86,15 @@ abstract class BaseUnitTestCase extends \PHPUnit_Framework_TestCase
     /**
      * Create a storage class for Propel.
      *
-     * @return \Lexik\Bundle\TranslationBundle\Storage\PropelStorage
+     * @return PropelStorage
      */
     protected function getPropelStorage()
     {
-        $storage = new PropelStorage(null, array(
-            'trans_unit'  => self::PROPEL_TRANS_UNIT_CLASS,
+        $storage = new PropelStorage(null, [
+            'trans_unit' => self::PROPEL_TRANS_UNIT_CLASS,
             'translation' => self::PROPEL_TRANSLATION_CLASS,
-            'file'        => self::PROPEL_FILE_CLASS,
-        ));
+            'file' => self::PROPEL_FILE_CLASS,
+        ]);
 
         return $storage;
     }
@@ -96,11 +106,11 @@ abstract class BaseUnitTestCase extends \PHPUnit_Framework_TestCase
      */
     protected function createSchema(ObjectManager $om)
     {
-        if ($om instanceof \Doctrine\ORM\EntityManager) {
-            $schemaTool = new \Doctrine\ORM\Tools\SchemaTool($om);
+        if ($om instanceof EntityManager) {
+            $schemaTool = new SchemaTool($om);
             $schemaTool->createSchema($om->getMetadataFactory()->getAllMetadata());
-        } elseif ($om instanceof \Doctrine\ODM\MongoDB\DocumentManager) {
-            $sm = new \Doctrine\ODM\MongoDB\SchemaManager($om, $om->getMetadataFactory());
+        } elseif ($om instanceof DocumentManager) {
+            $sm = new SchemaManager($om, $om->getMetadataFactory());
             $sm->dropDatabases();
             $sm->createCollections();
         }
@@ -113,22 +123,22 @@ abstract class BaseUnitTestCase extends \PHPUnit_Framework_TestCase
      */
     protected function loadFixtures(ObjectManager $om)
     {
-        if ($om instanceof \Doctrine\ORM\EntityManager) {
+        if ($om instanceof EntityManager) {
             $purger = new ORMPurger();
             $executor = new ORMExecutor($om, $purger);
-        } elseif ($om instanceof \Doctrine\ODM\MongoDB\DocumentManager) {
+        } elseif ($om instanceof DocumentManager) {
             $purger = new MongoDBPurger();
             $executor = new MongoDBExecutor($om, $purger);
         }
 
         $fixtures = new TransUnitData();
-        $executor->execute(array($fixtures), false);
+        $executor->execute([$fixtures], false);
     }
 
     /**
      * Load test fixtures for Propel.
      */
-    protected function loadPropelFixtures(\PropelPDO $con)
+    protected function loadPropelFixtures(ConnectionWrapper $con)
     {
         $fixtures = new TransUnitDataPropel();
         $fixtures->load($con);
@@ -136,26 +146,25 @@ abstract class BaseUnitTestCase extends \PHPUnit_Framework_TestCase
 
     /**
      * @param $om
-     * @return \PHPUnit_Framework_MockObject_MockObject
+     * @return MockObject
      */
     protected function getDoctrineRegistryMock($om)
     {
         $registryMock = $this->getMockBuilder('Symfony\Bridge\Doctrine\ManagerRegistry')
-            ->setConstructorArgs(array(
-                'registry',
-                array(),
-                array(),
-                'default',
-                'default',
-                'proxy',
-            ))
-            ->getMock();
+                             ->setConstructorArgs([
+                                 'registry',
+                                 [],
+                                 [],
+                                 'default',
+                                 'default',
+                                 'proxy',
+                             ])
+                             ->getMock();
 
         $registryMock
             ->expects($this->any())
             ->method('getManager')
-            ->will($this->returnValue($om))
-        ;
+            ->will($this->returnValue($om));
 
         return $registryMock;
     }
@@ -168,7 +177,7 @@ abstract class BaseUnitTestCase extends \PHPUnit_Framework_TestCase
      */
     protected function getMockSqliteEntityManager($mockCustomHydrator = false)
     {
-        $cache = new \Doctrine\Common\Cache\ArrayCache();
+        $cache = new ArrayCache();
 
         // xml driver
         $xmlDriver = new \Doctrine\ORM\Mapping\Driver\SimplifiedXmlDriver(array(
@@ -176,10 +185,10 @@ abstract class BaseUnitTestCase extends \PHPUnit_Framework_TestCase
             __DIR__.'/../../Resources/config/doctrine' => 'Lexik\Bundle\TranslationBundle\Entity',
         ));
 
-        $config = Setup::createAnnotationMetadataConfiguration(array(
-            __DIR__.'/../../Model',
-            __DIR__.'/../../Entity',
-        ), false, null, null, false);
+        $config = Setup::createAnnotationMetadataConfiguration([
+            __DIR__ . '/../../Model',
+            __DIR__ . '/../../Entity',
+        ], false, null, null, false);
 
         $config->setMetadataDriverImpl($xmlDriver);
         $config->setMetadataCacheImpl($cache);
@@ -191,17 +200,17 @@ abstract class BaseUnitTestCase extends \PHPUnit_Framework_TestCase
         $config->setDefaultRepositoryClassName('Doctrine\ORM\EntityRepository');
 
         if ($mockCustomHydrator) {
-            $config->setCustomHydrationModes(array(
+            $config->setCustomHydrationModes([
                 'SingleColumnArrayHydrator' => 'Lexik\Bundle\TranslationBundle\Util\Doctrine\SingleColumnArrayHydrator',
-            ));
+            ]);
         }
 
-        $conn = array(
+        $conn = [
             'driver' => 'pdo_sqlite',
             'memory' => true,
-        );
+        ];
 
-        $em = \Doctrine\ORM\EntityManager::create($conn, $config);
+        $em = EntityManager::create($conn, $config);
 
         return $em;
     }
@@ -209,7 +218,7 @@ abstract class BaseUnitTestCase extends \PHPUnit_Framework_TestCase
     /**
      * Create a DocumentManager instance for tests.
      *
-     * @return Doctrine\ODM\MongoDB\DocumentManager
+     * @return DocumentManager
      */
     protected function getMockMongoDbDocumentManager()
     {
@@ -217,59 +226,54 @@ abstract class BaseUnitTestCase extends \PHPUnit_Framework_TestCase
             __DIR__.'/../../Resources/config/model'    => 'Lexik\Bundle\TranslationBundle\Model',
             __DIR__.'/../../Resources/config/doctrine' => 'Lexik\Bundle\TranslationBundle\Document',
         );
-        $xmlDriver = new \Doctrine\Bundle\MongoDBBundle\Mapping\Driver\XmlDriver($prefixes);
+        $xmlDriver = new XmlDriver($prefixes);
 
-        $cache = new \Doctrine\Common\Cache\ArrayCache();
+        $cache = new ArrayCache();
 
-        $config = new \Doctrine\ODM\MongoDB\Configuration();
+        $config = new Configuration();
         $config->setMetadataCacheImpl($cache);
         $config->setMetadataDriverImpl($xmlDriver);
         $config->setProxyDir(sys_get_temp_dir());
         $config->setProxyNamespace('Proxy');
-        $config->setAutoGenerateProxyClasses(true);
-        $config->setClassMetadataFactoryName('Doctrine\ODM\MongoDB\Mapping\ClassMetadataFactory');
+        $config->setAutoGenerateProxyClasses(Configuration::AUTOGENERATE_FILE_NOT_EXISTS);
+        $config->setClassMetadataFactoryName(ClassMetadataFactory::class);
         $config->setDefaultDB('lexik_translation_bundle_test');
         $config->setHydratorDir(sys_get_temp_dir());
         $config->setHydratorNamespace('Doctrine\ODM\MongoDB\Hydrator');
         $config->setAutoGenerateHydratorClasses(true);
-        $config->setDefaultCommitOptions(array());
+        $config->setDefaultCommitOptions([]);
 
-        $options = array();
-        $conn = new \Doctrine\MongoDB\Connection(null, $options, $config);
+        $server = getenv('MONGO_SERVER') ?: null;
+        $driverOptions = [
+            'typeMap' =>  ['root' => 'array', 'document' => 'array'],
+        ];
+        $conn = new Client($server, [], $driverOptions);
 
-        $dm = \Doctrine\ODM\MongoDB\DocumentManager::create($conn, $config);
+        $dm = DocumentManager::create($conn, $config);
 
         return $dm;
     }
 
     /**
-     * @return \PropelPDO
+     * @return ConnectionWrapper
      */
     protected function getMockPropelConnection()
     {
-        if (!class_exists('Lexik\\Bundle\\TranslationBundle\\Propel\\om\\BaseFile')) {
+        if (!class_exists('Lexik\\Bundle\\TranslationBundle\\Propel\\Base\\File')) {
             // classes are built in-memory.
-            $builder = new \PropelQuickBuilder();
-            $builder->setSchema(file_get_contents(__DIR__.'/../../Resources/config/propel/schema.xml'));
-            $builder->setClassTargets(array('tablemap', 'peer', 'object', 'query'));
-            $con = $builder->build();
+            $builder = new QuickBuilder();
+            $builder->setSchema(file_get_contents(__DIR__ . '/../../Resources/config/propel/schema.xml'));
+            $con = $builder->build(null, null, null, null, ['tablemap', 'object', 'query']);
         } else {
             // in memory-classes already exist, create connection and SQL manually
             $dsn = 'sqlite::memory:';
-            $adapter = new \DBSQLite();
-            $con = new \PropelPDO($dsn, null, null);
-            $con->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_WARNING);
-            $name = 'default';
-            if (!\Propel::isInit()) {
-                \Propel::setConfiguration(array('datasources' => array('default' => $name)));
-            }
-            \Propel::setDB($name, $adapter);
-            \Propel::setConnection($name, $con, \Propel::CONNECTION_READ);
-            \Propel::setConnection($name, $con, \Propel::CONNECTION_WRITE);
+            $pdoConnection = new PdoConnection($dsn);
+            $con = new ConnectionWrapper($pdoConnection);
+            Propel::getServiceContainer()->setConnection('default', $con);
 
-            // don't rebuild classes
-            $builder = new \PropelQuickBuilder();
-            $builder->setSchema(file_get_contents(__DIR__.'/../../Resources/config/propel/schema.xml'));
+            $con->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_WARNING);
+            $builder = new QuickBuilder();
+            $builder->setSchema(file_get_contents(__DIR__ . '/../../Resources/config/propel/schema.xml'));
             $builder->buildSQL($con);
         }
 
