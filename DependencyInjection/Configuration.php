@@ -37,12 +37,12 @@ class Configuration implements ConfigurationInterface
             ->children()
                 ->scalarNode('base_layout')
                     ->cannotBeEmpty()
-                    ->defaultValue('LexikTranslationBundle::layout.html.twig')
+                    ->defaultValue('@LexikTranslationBundle/layout.html.twig')
                 ->end()
 
                 ->arrayNode('fallback_locale')
                     ->isRequired()
-                    ->cannotBeEmpty()
+                    ->requiresAtLeastOneElement()
                     ->prototype('scalar')->end()
                     ->beforeNormalization()
                         ->ifString()
@@ -52,7 +52,7 @@ class Configuration implements ConfigurationInterface
 
                 ->arrayNode('managed_locales')
                     ->isRequired()
-                    ->cannotBeEmpty()
+                    ->requiresAtLeastOneElement()
                     ->prototype('scalar')->end()
                 ->end()
 

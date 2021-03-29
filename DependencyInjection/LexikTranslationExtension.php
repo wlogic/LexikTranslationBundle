@@ -8,6 +8,7 @@ use Symfony\Component\Config\FileLocator;
 use Symfony\Component\Config\Definition\Processor;
 use Symfony\Component\Config\Resource\DirectoryResource;
 use Symfony\Component\HttpKernel\DependencyInjection\Extension;
+use Symfony\Component\DependencyInjection\Extension\PrependExtensionInterface;
 use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\DependencyInjection\Parameter;
 use Symfony\Component\DependencyInjection\Definition;
@@ -23,7 +24,7 @@ use Symfony\Component\HttpKernel\Kernel;
  *
  * @author Cédric Girard <c.girard@lexik.fr>
  */
-class LexikTranslationExtension extends Extension
+class LexikTranslationExtension extends Extension implements PrependExtensionInterface
 {
     /**
      * {@inheritdoc}
@@ -76,7 +77,16 @@ class LexikTranslationExtension extends Extension
         $translator = new Definition();
         $translator->setClass('%lexik_translation.translator.class%');
 
-        if (Kernel::VERSION_ID >= 30300) {
+        if (Kernel::VERSION_ID >= 30400) {
+            $arguments = [
+                new Reference('service_container'), // Will be replaced by service locator
+                new Reference('translator.formatter.default'),
+                new Parameter('kernel.default_locale'),
+                [], // translation loaders
+                new Parameter('lexik_translation.translator.options')
+            ];
+            $translator->setPublic(true);
+        } elseif (Kernel::VERSION_ID >= 30300) {
             $arguments = [
                 new Reference('service_container'), // Will be replaced by service locator
                 new Reference('translator.selector'),
@@ -95,6 +105,7 @@ class LexikTranslationExtension extends Extension
 
         $translator->setArguments($arguments);
         $translator->addMethodCall('setConfigCacheFactory', [new Reference('config_cache_factory')]);
+        $translator->addTag('kernel.locale_aware');
 
         $container->setDefinition('lexik_translation.translator', $translator);
     }
@@ -120,6 +131,28 @@ class LexikTranslationExtension extends Extension
         ));
 
         $container->setDefinition('lexik_translation.listener.clean_translation_cache', $listener);
+    }
+
+    public function prepend(ContainerBuilder $container)
+    {
+        if (!$container->hasExtension('twig')) {
+            return;
+        }
+
+        $rootDir = 'vendor/lexik/translation-bundle/Resources/views';
+
+        // Only symfony versions >= 3.3 include the kernel.project_dir parameter
+        if (Kernel::VERSION_ID >= 30300) {
+            $rootDir = '%kernel.project_dir%/'.$rootDir;
+        } else {
+            $rootDir = '%kernel.root_dir%/../'.$rootDir;
+        }
+
+        $container->prependExtensionConfig('twig', [
+            'paths' => [
+                $rootDir => 'LexikTranslationBundle'
+            ]
+        ]);
     }
 
     /**
@@ -173,6 +206,7 @@ class LexikTranslationExtension extends Extension
         $storageDefinition = new Definition();
         $storageDefinition->setClass($container->getParameter(sprintf('lexik_translation.%s.translation_storage.class', $storage)));
         $storageDefinition->setArguments($args);
+        $storageDefinition->setPublic(true);
 
         $container->setDefinition('lexik_translation.translation_storage', $storageDefinition);
     }
@@ -224,7 +258,11 @@ class LexikTranslationExtension extends Extension
     protected function registerTranslatorConfiguration(array $config, ContainerBuilder $container)
     {
         // use the Lexik translator as default translator service
-        $container->setAlias('translator', 'lexik_translation.translator');
+        $alias = $container->setAlias('translator', 'lexik_translation.translator');
+
+        if (Kernel::VERSION_ID >= 30400) {
+            $alias->setPublic(true);
+        }
 
         $translator = $container->findDefinition('lexik_translation.translator');
         $translator->addMethodCall('setFallbackLocales', array($config['fallback_locale']));
@@ -270,6 +308,10 @@ class LexikTranslationExtension extends Extension
             }
 
             if (is_dir($dir = $container->getParameter('kernel.root_dir').'/Resources/translations')) {
+                $dirs[] = $dir;
+            }
+
+            if (Kernel::MAJOR_VERSION >= 4 && is_dir($dir = $container->getParameter('kernel.project_dir').'/translations')) {
                 $dirs[] = $dir;
             }
 
