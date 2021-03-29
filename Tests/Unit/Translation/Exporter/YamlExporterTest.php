@@ -3,13 +3,14 @@
 namespace Lexik\Bundle\TranslationBundle\Tests\Unit\Translation\Exporter;
 
 use Lexik\Bundle\TranslationBundle\Translation\Exporter\YamlExporter;
+use PHPUnit\Framework\TestCase;
 
 /**
  * YamlExporter tests.
  *
  * @author Cédric Girard <c.girard@lexik.fr>
  */
-class YamlExporterTest extends \PHPUnit_Framework_TestCase
+class YamlExporterTest extends TestCase
 {
     private $outFileName = '/file.out';
 
@@ -34,7 +35,7 @@ class YamlExporterTest extends \PHPUnit_Framework_TestCase
         // export empty array
         $exporter->export($outFile, array());
         $expectedContent = '{  }';
-        $this->assertEquals($expectedContent, file_get_contents($outFile));
+        $this->assertEquals($expectedContent, trim(file_get_contents($outFile)));
 
         // export array with values
         $exporter->export($outFile, array(
